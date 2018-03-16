@@ -15,6 +15,10 @@ public class ManService {
 
     private ManDAO manDAO;
 
+    //    ManService(ManDAO manDAO) {
+    //        this.manDAO = manDAO;
+    //    }
+
     public Man get() {
         return manDAO.get();
     }

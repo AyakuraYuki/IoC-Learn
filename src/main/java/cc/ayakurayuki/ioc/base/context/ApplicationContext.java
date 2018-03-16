@@ -12,6 +12,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -95,9 +96,9 @@ public class ApplicationContext {
     }
 
     /**
-     * 根据获取到的Bean列表初始化所有的Bean
+     * Initial beans from configured bean list.
      *
-     * @param beanList 来自{@link #readXML()}的返回值
+     * @param beanList From the return of {@link #readXML()}
      */
     private void initBean(List<Bean> beanList) {
         for (Bean bean : beanList) {
@@ -135,19 +136,11 @@ public class ApplicationContext {
                     if (beans.containsKey(ref)) {
                         // 从搜索到的bean获取对应的实例对象
                         Object refObject = beans.get(ref).getObject();
-                        // 采用setter注入的方式将所需的对象注入, 标准setter的前缀均为"set"
-                        final String setterPrefix = "set";
-                        // 拼接出待注入对象的setter方法名
-                        String methodName = setterPrefix + toUpperCamelCase(property.getName());
-                        // 通过反射获取setter方法, 该方法应该是位于本方法(setBeanProperties())最外层循环中的bean
+                        Object beanObject = bean.getObject();
                         try {
-                            Object beanObject = bean.getObject();
-                            // 注意此处的getMethod(), 第一个参数是拼接好的setter方法名, 第二个参数是ref指向的实例对象
-                            Method setter = beanObject.getClass().getMethod(methodName, refObject.getClass());
-                            // 注入!!!
-                            setter.invoke(beanObject, refObject);
-                        } catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException e) {
-                            e.printStackTrace();
+                            setterInjection(beanObject, property.getName(), refObject);
+                        } catch (RuntimeException e) {
+                            constructInjection(bean, new Class<?>[]{refObject.getClass()}, refObject);
                         }
                     } else {
                         // 当然，如果找不到ref使用到的bean, 抛出异常
@@ -155,6 +148,45 @@ public class ApplicationContext {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Inject by setter style.
+     */
+    private static void setterInjection(Object targetObject, String attributeName, Object injectObject) {
+        // In generally the prefix of every setter is "set".
+        final String setterPrefix = "set";
+        // Generate target method name.
+        final String methodName = setterPrefix + toUpperCamelCase(attributeName);
+        try {
+            // Get target method.
+            Method targetSetter = targetObject.getClass().getMethod(methodName, injectObject.getClass());
+            // Inject reference object into target object's attribute.
+            targetSetter.invoke(targetObject, injectObject);
+        } catch (NoSuchMethodException e) {
+            throw new RuntimeException("Target method named '" + methodName + "' not found.");
+        } catch (IllegalAccessException e) {
+            throw new RuntimeException("Cannot access to method '" + methodName + "', probably it is private.");
+        } catch (InvocationTargetException e) {
+            throw new RuntimeException(e.getMessage());
+        }
+    }
+
+    /**
+     * Inject by construct style. (Recommended)
+     */
+    private static void constructInjection(Bean bean, Class<?>[] parameterTypes, Object... injectObjects) {
+        Class<?> clazz = bean.getObject().getClass();
+        try {
+            Constructor constructor = clazz.getConstructor(parameterTypes);
+            bean.setObject(constructor.newInstance(injectObjects));
+        } catch (NoSuchMethodException e) {
+            throw new RuntimeException("Target constructor not found.");
+        } catch (IllegalAccessException e) {
+            throw new RuntimeException("Cannot access to constructor, probably it is private.");
+        } catch (InstantiationException | InvocationTargetException e) {
+            throw new RuntimeException(e.getMessage());
         }
     }
 
